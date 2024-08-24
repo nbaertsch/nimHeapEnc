@@ -1,6 +1,6 @@
 #[
   Basic heap encryption example in Nim. Compile like `nim c -d:mingw -o:./bin/ --threads:on --mm:orc -d:release .\heapEnc.nim`
-  UPDAT: as of nim 2.0, ARC/ORC both use a shared heap with a flawed shared allocator implementation. Use -mm:refc on nim 2.0 till this is fixed.
+  UPDATE: as of nim 2.0, the ARC/ORC implementation changed. Using the `rollXor` proc nested in the heapsleep proc resulted in the compiler creating a clousure which uses the heap.
   -nbaertsch
 ]#
 import winim/lean
@@ -35,7 +35,8 @@ proc heapEncSleep(ms: DWORD, keyBuf: array[16, byte]) {.stdcall.} =
         SecureZeroMemory(pHeapEntry, sizeof(PROCESS_HEAP_ENTRY))
         while HeapWalk(pHeaps[i], pHeapEntry).bool: # walking heap entries
             if (pHeapEntry[].wFlags and PROCESS_HEAP_ENTRY_BUSY) != 0: # only allocated blocks
-                rollXor(keyBuf, cast[ptr UncheckedArray[byte]](pHeapEntry[].lpData), pHeapEntry[].cbData.int)
+                for i in 0..pHeapEntry[].cbData.int-1:
+                        cast[ptr UncheckedArray[byte]](pHeapEntry[].lpData)[i] = cast[ptr UncheckedArray[byte]](pHeapEntry[].lpData)[i] xor keyBuf[(i mod (16))]
 
     Sleep(ms)
 
@@ -45,7 +46,8 @@ proc heapEncSleep(ms: DWORD, keyBuf: array[16, byte]) {.stdcall.} =
         SecureZeroMemory(pHeapEntry, sizeof(PROCESS_HEAP_ENTRY))
         while HeapWalk(pHeaps[i], pHeapEntry).bool: # walking heap entries
             if (pHeapEntry[].wFlags and PROCESS_HEAP_ENTRY_BUSY) != 0: # only allocated blocks
-                rollXor(keyBuf, cast[ptr UncheckedArray[byte]](pHeapEntry[].lpData), pHeapEntry[].cbData.int)
+                for i in 0..pHeapEntry[].cbData.int-1:
+                        cast[ptr UncheckedArray[byte]](pHeapEntry[].lpData)[i] = cast[ptr UncheckedArray[byte]](pHeapEntry[].lpData)[i] xor keyBuf[(i mod (16))]
 
 proc DoSuspendThreads*(targetProcessId: DWORD, targetThreadId: DWORD) = 
     # Take a module snapshot and start walking through it
