@@ -1,6 +1,7 @@
 #[
   Basic heap encryption example in Nim. Compile like `nim c -d:mingw -o:./bin/ --threads:on --mm:orc -d:release .\heapEnc.nim`
-  -Nb
+  UPDAT: as of nim 2.0, ARC/ORC both use a shared heap with a flawed shared allocator implementation. Use -mm:refc on nim 2.0 till this is fixed.
+  -nbaertsch
 ]#
 import winim/lean
 import winim/inc/tlhelp32
@@ -13,7 +14,7 @@ proc rollXor*(pkey: array[16, byte], p: ptr UncheckedArray[byte], cb: int) =
         p[i] = p[i] xor pkey[(i mod (16))]
 
 # Encrypts all non busy heap blocks and calls SmartEkko()
-proc heapEncSleep(ms: DWORD) {.stdcall.} =
+proc heapEncSleep(ms: DWORD, keyBuf: array[16, byte]) {.stdcall.} =
     var numHeaps = GetProcessHeaps(0,NULL)
     var heapHandlesOnHeap = newSeq[HANDLE](numHeaps)
     GetProcessHeaps(numHeaps, (PHANDLE)(addr heapHandlesOnHeap[0]))
@@ -26,7 +27,7 @@ proc heapEncSleep(ms: DWORD) {.stdcall.} =
     copyMem(pHeaps, addr heapHandlesOnHeap[0], sizeof(HANDLE) * numHeaps)
     zeroMem(addr heapHandlesOnHeap, sizeof(heapHandlesOnHeap))
 
-    var pHeapEntry: ptr PROCESS_HEAP_ENTRY = cast[ptr PROCESS_HEAP_ENTRY](HeapAlloc(hHeap, 0, (sizeof(PROCESS_HEAP_ENTRY) * numHeaps).SIZE_T))
+    var pHeapEntry: ptr PROCESS_HEAP_ENTRY = cast[ptr PROCESS_HEAP_ENTRY](HeapAlloc(hHeap, 0, (sizeof(PROCESS_HEAP_ENTRY)).SIZE_T))
 
     # Heap xor
     for i in DWORD(0) .. numHeaps-1:
@@ -96,5 +97,5 @@ when isMainModule:
         echo "sleeping for 20 on key ->"
         discard stdin.readline
         DoSuspendThreads(GetCurrentProcessId(), GetCurrentThreadId())
-        heapEncSleep(20 * 1000)
+        heapEncSleep(20 * 1000, keyBuf)
         DoResumeThreads(GetCurrentProcessId(), GetCurrentThreadId())
