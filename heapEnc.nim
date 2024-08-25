@@ -1,6 +1,8 @@
 #[
   Basic heap encryption example in Nim. Compile like `nim c -d:mingw -o:./bin/ --threads:on --mm:orc -d:release .\heapEnc.nim`
-  UPDATE: as of nim 2.0, the ARC/ORC implementation changed. Using the `rollXor` proc nested in the heapsleep proc resulted in the compiler creating a clousure which uses the heap.
+  UPDATE: as of nim 2.0;
+    - Using the `rollXor` proc nested in the heapsleep proc resulted in the compiler creating a clousure which uses the heap.
+    - We also now need to use -mm:refc or -mm:markAndSweep since the Arc/orc models both now use shared heaps across all nim-threads
   -nbaertsch
 ]#
 import winim/lean
@@ -14,7 +16,7 @@ proc rollXor*(pkey: array[16, byte], p: ptr UncheckedArray[byte], cb: int) =
         p[i] = p[i] xor pkey[(i mod (16))]
 
 # Encrypts all non busy heap blocks and calls SmartEkko()
-proc heapEncSleep(ms: DWORD, keyBuf: array[16, byte]) {.stdcall.} =
+proc heapEncSleep(ms: DWORD, keyBuf: ptr array[16, byte]) {.stdcall.} =
     var numHeaps = GetProcessHeaps(0,NULL)
     var heapHandlesOnHeap = newSeq[HANDLE](numHeaps)
     GetProcessHeaps(numHeaps, (PHANDLE)(addr heapHandlesOnHeap[0]))
@@ -32,11 +34,12 @@ proc heapEncSleep(ms: DWORD, keyBuf: array[16, byte]) {.stdcall.} =
     # Heap xor
     for i in DWORD(0) .. numHeaps-1:
         #if (pHeaps[i] == GetProcessHeap()): continue # Skip main process heap
+        #echo "xoring heap ", i, " of ", numHeaps-1
         SecureZeroMemory(pHeapEntry, sizeof(PROCESS_HEAP_ENTRY))
         while HeapWalk(pHeaps[i], pHeapEntry).bool: # walking heap entries
             if (pHeapEntry[].wFlags and PROCESS_HEAP_ENTRY_BUSY) != 0: # only allocated blocks
                 for i in 0..pHeapEntry[].cbData.int-1:
-                        cast[ptr UncheckedArray[byte]](pHeapEntry[].lpData)[i] = cast[ptr UncheckedArray[byte]](pHeapEntry[].lpData)[i] xor keyBuf[(i mod (16))]
+                    cast[ptr UncheckedArray[byte]](pHeapEntry[].lpData)[i] = cast[ptr UncheckedArray[byte]](pHeapEntry[].lpData)[i] xor keyBuf[][(i mod (16))]
 
     Sleep(ms)
 
@@ -47,7 +50,7 @@ proc heapEncSleep(ms: DWORD, keyBuf: array[16, byte]) {.stdcall.} =
         while HeapWalk(pHeaps[i], pHeapEntry).bool: # walking heap entries
             if (pHeapEntry[].wFlags and PROCESS_HEAP_ENTRY_BUSY) != 0: # only allocated blocks
                 for i in 0..pHeapEntry[].cbData.int-1:
-                        cast[ptr UncheckedArray[byte]](pHeapEntry[].lpData)[i] = cast[ptr UncheckedArray[byte]](pHeapEntry[].lpData)[i] xor keyBuf[(i mod (16))]
+                        cast[ptr UncheckedArray[byte]](pHeapEntry[].lpData)[i] = cast[ptr UncheckedArray[byte]](pHeapEntry[].lpData)[i] xor keyBuf[][(i mod (16))]
 
 proc DoSuspendThreads*(targetProcessId: DWORD, targetThreadId: DWORD) = 
     # Take a module snapshot and start walking through it
@@ -96,8 +99,8 @@ proc DoResumeThreads*(targetProcessId: DWORD, targetThreadId: DWORD) =
 when isMainModule:
     #enableHook(heapEncSleep)
     while true:
-        echo "sleeping for 20 on key ->"
+        echo "sleeping for 3 on key ->"
         discard stdin.readline
         DoSuspendThreads(GetCurrentProcessId(), GetCurrentThreadId())
-        heapEncSleep(20 * 1000, keyBuf)
+        heapEncSleep(3 * 1000, keyBuf.addr)
         DoResumeThreads(GetCurrentProcessId(), GetCurrentThreadId())
